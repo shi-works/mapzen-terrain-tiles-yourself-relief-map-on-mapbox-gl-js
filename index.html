@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>自分で作る色別標高図（Mapzen Terrain Tiles）</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+  <script src='https://api.mapbox.com/mapbox-gl-js/v3.0.0-beta.1/mapbox-gl.js'></script>
+  <link href='https://api.mapbox.com/mapbox-gl-js/v3.0.0-beta.1/mapbox-gl.css' rel='stylesheet' />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+    }
+
+    .map-overlay {
+      font: bold 12px/20px 'Helvetica Neue', Arial, Helvetica, sans-serif;
+      position: absolute;
+      width: 200px;
+      bottom: 50px;
+      left: 0;
+      padding: 10px;
+    }
+
+    .map-overlay .map-overlay-inner {
+      background-color: #fff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+      border-radius: 3px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+
+    .map-overlay label {
+      display: block;
+      margin: 0 0 0px;
+      font-size: 12px;
+      top: 100px;
+      left: 10px;
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .map-overlay input {
+      background-color: transparent;
+      display: inline-block;
+      width: 100%;
+      position: relative;
+      margin: 0;
+      cursor: ew-resize;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+  <div class="map-overlay top">
+    <div class="map-overlay-inner">
+      <label>地形の高さを強調する倍率: <span id="slider-opacity-value">7倍</span></label>
+      <input id="slider-opacity" type="range" min="0" max="20" step="1" value="7">
+    </div>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.6.2/dat.gui.min.js"></script>
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1Ijoic2hpd29ya3MiLCJhIjoiY2szeHZjeXJsMDJzdDNsbXczdnN1b3hpNiJ9.VQg_5pGbF1qU_6FZ33Uf4g';
+
+    const map = new mapboxgl.Map({
+      container: "map",
+      style: 'https://tile.openstreetmap.jp/styles/maptiler-basic-ja/style.json',
+      hash: true,
+      center: {
+        lat: 36.28,
+        lng: 137.69
+      },
+      zoom: 4.78,
+      language: 'ja',
+      attributionControl: false
+    });
+
+    // ズーム・回転
+    map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+
+    // フルスクリーンモードのオンオフ
+    map.addControl(new mapboxgl.FullscreenControl(), 'top-left');
+
+    // 現在位置表示
+    map.addControl(new mapboxgl.GeolocateControl({
+      positionOptions: {
+        enableHighAccuracy: false
+      },
+      fitBoundsOptions: { maxZoom: 18 },
+      trackUserLocation: true,
+      showUserLocation: true
+    }), 'top-left');
+
+    // スケール表示
+    map.addControl(new mapboxgl.ScaleControl({
+      maxWidth: 200,
+      unit: 'metric'
+    }));
+
+    // Attributionを折りたたみ表示
+    map.addControl(new mapboxgl.AttributionControl({
+      compact: true,
+      customAttribution: '（<a href="https://twitter.com/shi__works" target="_blank">Twitter</a> | <a href="https://github.com/shi-works/japan-sea-level-rise-map-on-mapbox-gl-js" target="_blank">Github</a>） '
+    }));
+
+    // 地図がロードされたら実行
+    map.on('load', () => {
+      // Mapzen標高タイルDEMソース
+      map.addSource("mapzen-terrain-dem", {
+        type: 'raster-dem',
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        attribution: '<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">Tilezen Joerd: Attribution</a>',
+        encoding: "terrarium"
+      });
+
+      // Mapzen標高タイルDEMセット
+      map.setTerrain({ 'source': 'mapzen-terrain-dem', 'exaggeration': 7 });
+
+      // スライダーで Mapzen標高タイルDEM高さの倍率を制御
+      const sliderOpacity = document.getElementById('slider-opacity');
+      const sliderOpacityValue = document.getElementById('slider-opacity-value');
+
+      sliderOpacity.addEventListener('input', (e) => {
+        const exaggerationValue = parseFloat(e.target.value);
+        map.setTerrain({ 'source': 'mapzen-terrain-dem', 'exaggeration': exaggerationValue });
+        sliderOpacityValue.textContent = e.target.value + '倍';
+      });
+
+      // Mapzen標高タイルラスターソース
+      map.addSource("mapzen-terrain-raster", {
+        type: 'raster',
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+        attribution: '<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">Tilezen Joerd: Attribution</a>'
+      });
+
+      var colors = {
+        "-8000": '#002632',
+        "-8000--7000": '#004C65',
+        "-7000--6000": '#007298',
+        "-6000--5000": '#0098CB',
+        "-5000--4000": '#00BFFF',
+        "-4000--3000": '#32CCFF',
+        "-3000--2000": '#65D8FF',
+        "-2000--1000": '#99E5FF',
+        "-1000-0": '#CCF2FF',
+        "0-250": '#A4FEE6',
+        "250-500": '#72FED9',
+        "500-750": '#74FF8A',
+        "750-1000": '#AAFE72',
+        "1000-1250": '#F9FF74',
+        "1000-1250": '#F9FF74',
+        "1250-1500": '#FDB271',
+        "1500-1750": '#FF7380',
+        "1750-2000": '#FE72D2',
+        "2000-": '#F274FC'
+      };
+
+      // Mapzen標高タイルラスターレイヤ
+      map.addLayer({
+        id: 'mapzen-terrain-raster',
+        source: 'mapzen-terrain-raster',
+        type: 'raster',
+        paint: {
+          'raster-color': [
+            'interpolate',
+            ['linear'],
+            ['raster-value'],
+            -8000, colors['-8000'],
+            -7000, colors['-8000--7000'],
+            -6000, colors['-7000--6000'],
+            -5000, colors['-6000--5000'],
+            -4000, colors['-5000--4000'],
+            -3000, colors['-4000--3000'],
+            -2000, colors['-3000--2000'],
+            -1000, colors['-2000--1000'],
+            0, colors['-1000-0'],
+            250, colors['0-250'],
+            500, colors['250-500'],
+            750, colors['500-750'],
+            1000, colors['750-1000'],
+            1250, colors['1000-1250'],
+            1500, colors['1250-1500'],
+            1750, colors['1500-1750'],
+            2000, colors['1750-2000'],
+            4000, colors['2000-']
+          ],
+          'raster-color-mix': [
+            255 * 2 ** 8,
+            255,
+            255 / 2 ** 8,
+            -32768
+          ],
+          'raster-color-range': [-10000, 10000],
+          'raster-opacity': 0.7,
+          'raster-resampling': 'nearest'
+        }
+      })
+
+      var gui = new dat.GUI();
+      gui.addColor(colors, '-8000').onChange(setReliefColors);
+      gui.addColor(colors, '-8000--7000').onChange(setReliefColors);
+      gui.addColor(colors, '-7000--6000').onChange(setReliefColors);
+      gui.addColor(colors, '-6000--5000').onChange(setReliefColors);
+      gui.addColor(colors, '-5000--4000').onChange(setReliefColors);
+      gui.addColor(colors, '-4000--3000').onChange(setReliefColors);
+      gui.addColor(colors, '-3000--2000').onChange(setReliefColors);
+      gui.addColor(colors, '-2000--1000').onChange(setReliefColors);
+      gui.addColor(colors, '-1000-0').onChange(setReliefColors);
+      gui.addColor(colors, '0-250').onChange(setReliefColors);
+      gui.addColor(colors, '250-500').onChange(setReliefColors);
+      gui.addColor(colors, '500-750').onChange(setReliefColors);
+      gui.addColor(colors, '750-1000').onChange(setReliefColors);
+      gui.addColor(colors, '1000-1250').onChange(setReliefColors);
+      gui.addColor(colors, '1250-1500').onChange(setReliefColors);
+      gui.addColor(colors, '1500-1750').onChange(setReliefColors);
+      gui.addColor(colors, '1750-2000').onChange(setReliefColors);
+      gui.addColor(colors, '2000-').onChange(setReliefColors);
+
+      function setReliefColors() {
+        map.setPaintProperty('mapzen-terrain-raster', 'raster-color', [
+          'interpolate',
+          ['linear'],
+          ['raster-value'],
+          -8000, colors['-8000'],
+          -7000, colors['-8000--7000'],
+          -6000, colors['-7000--6000'],
+          -5000, colors['-6000--5000'],
+          -4000, colors['-5000--4000'],
+          -3000, colors['-4000--3000'],
+          -2000, colors['-3000--2000'],
+          -1000, colors['-2000--1000'],
+          0, colors['-1000-0'],
+          250, colors['0-250'],
+          500, colors['250-500'],
+          750, colors['500-750'],
+          1000, colors['750-1000'],
+          1250, colors['1000-1250'],
+          1500, colors['1250-1500'],
+          1750, colors['1500-1750'],
+          2000, colors['1750-2000'],
+          4000, colors['2000-']
+        ]);
+      }
+
+      // 陰影起伏図ソース
+      map.addSource("hillshade", {
+        type: 'raster',
+        tiles: [
+          'https://cyberjapandata.gsi.go.jp/xyz/earthhillshade/{z}/{x}/{y}.png',
+        ],
+        attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html#earthhillshade target="_blank">地理院タイル(陰影起伏図(全球版))</a>',
+        tileSize: 256
+      });
+
+      // 陰影起伏図レイヤ
+      map.addLayer({
+        id: 'hillshade',
+        type: 'raster',
+        source: 'hillshade',
+        minzoom: 2,
+        maxzoom: 18,
+        paint: {
+          'raster-opacity': 0.2
+        }
+      });
+
+    })
+  </script>
+
+</body>
+
+</html>
